@@ -1,17 +1,10 @@
-import os
+import pickle
+import random
 import time
 
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup, Comment
 
 base_url = "https://www.pro-football-reference.com"
 years = range(2017, 2024)
@@ -49,31 +42,27 @@ teams = [
     "oti",
     "was",
 ]
-high_schools = {}
+
+# Load cached high school data if available
+try:
+    with open("high_schools.pkl", "rb") as f:
+        high_schools = pickle.load(f)
+    print("Loaded cached high school data.")
+except FileNotFoundError:
+    high_schools = {}
+    print("No cached high school data found, starting fresh.")
 
 
-def setup_selenium():
-    chrome_options = Options()
-    # chrome_options.add_argument("--headless" )
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()), options=chrome_options
-    )
-    return driver
-
-
-def get_high_school(driver, player_url):
-    print(f"Scraping high school info for {player_url}...")
+def get_high_school(player_url, session):
     if player_url in high_schools:
         return high_schools[player_url]
+    print(f"Scraping high school info for {player_url}...")
     url = base_url + player_url
-    driver.get(url)
-
-    try:
-        bio_section = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "meta"))
-        )
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
+    response = session.get(url, headers=headers)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, "html.parser")
+        bio_section = soup.find("div", id="meta")
         if bio_section:
             high_school = None
             for p in bio_section.find_all("p"):
@@ -82,76 +71,101 @@ def get_high_school(driver, player_url):
                     high_school = p_text.split(":")[1].strip()
                     break
             high_schools[player_url] = high_school
+            time.sleep(random.uniform(3, 5))  # Respect crawl delay with randomness
             return high_school
-        return None
-    except Exception as e:
-        print(f"Error scraping {player_url}: {e}")
-        return None
+    else:
+        print(f"Error scraping {player_url}: Status code {response.status_code}")
+    return None
 
 
-def scrape_team_roster(driver, team, year):
+def scrape_team_roster(team, year, session):
     print(f"Scraping {team} for {year}...")
     url = f"{base_url}/teams/{team}/{year}_roster.htm"
-    driver.get(url)
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
+    response = session.get(url, headers=headers)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, "html.parser")
+        # The roster table is within a commented section. We need to extract and parse it.
+        comments = soup.find_all(string=lambda text: isinstance(text, Comment))
+        roster_html = None
+        for comment in comments:
+            if 'id="roster"' in comment:
+                roster_html = comment
+                break
+        if roster_html:
+            roster_soup = BeautifulSoup(roster_html, "html.parser")
+            table = roster_soup.find("table", id="roster")
+            if table:
+                df = pd.read_html(str(table))[0]
+                print(f"Columns found: {df.columns}")
+                df["High School"] = None
 
-    try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "all_roster"))
-        )
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+                # Create a mapping from player names to URLs
+                player_links = {}
+                for row in table.find_all("tr"):
+                    player_cell = row.find("td", {"data-stat": "player"})
+                    if player_cell:
+                        a_tag = player_cell.find("a")
+                        if a_tag:
+                            player_name = a_tag.text.strip()
+                            player_url = a_tag["href"]
+                            player_links[player_name] = player_url
 
-        all_roster_div = soup.find("div", id="all_roster")
-        table = all_roster_div.find("table", id="roster")
+                # Visit profile, extract high school
+                for idx, row in df.iterrows():
+                    player_name = row["Player"]
+                    if player_name in player_links:
+                        player_url = player_links[player_name]
+                        high_school = get_high_school(player_url, session)
+                        df.at[idx, "High School"] = high_school
+                        print(f"Player: {player_name}, High School: {high_school}")
+                    else:
+                        print(f"Player link not found for {player_name}")
+                    time.sleep(
+                        random.uniform(3, 5)
+                    )  # Respect crawl delay with randomness
 
-        if table:
-            df = pd.read_html(str(table))[0]
-
-            print(df.columns)
-
-            df["High School"] = None
-
-            # visit profile, extract high school
-            for idx, row in df.iterrows():
-                player_tag = table.find("a", text=row["Player"])
-                if player_tag:
-                    player_url = player_tag["href"]
-                    high_school = get_high_school(driver, player_url)
-                    df.at[idx, "High School"] = high_school
-                    print(f"Player: {row['Player']}, High School: {high_school}")
-
-                    time.sleep(1)
-
-            file_name = f"{year}_{team}_roster.csv"
-            df.to_csv(file_name, index=False)
-            print(f"Saved {file_name}")
-            return file_name
+                file_name = f"{year}_{team}_roster.csv"
+                df.to_csv(file_name, index=False)
+                print(f"Saved {file_name}")
+                return file_name
+            else:
+                print(f"Roster table not found for {team} in {year}")
+                return None
         else:
-            print(f"Roster table not found for {team} in {year}")
+            print(f"Could not find roster table in comments for {team} in {year}")
             return None
-    except Exception as e:
-        print(f"Error scraping {team} in {year}: {e}")
+    else:
+        print(f"Error scraping {team} in {year}: Status code {response.status_code}")
         return None
 
 
 def scrape_all_teams():
-    driver = setup_selenium()
     all_files = []
-
+    session = requests.Session()
     for team in teams:
         for year in years:
-            print(f"Scraping {team} for {year}...")
             try:
-                csv_file = scrape_team_roster(driver, team, year)
+                csv_file = scrape_team_roster(team, year, session)
                 if csv_file:
                     all_files.append(csv_file)
             except Exception as e:
                 print(f"Failed to scrape {team} in {year}: {e}")
+            time.sleep(random.uniform(3, 5))  # Respect crawl delay between teams
+
+    # Save high schools cache
+    with open("high_schools.pkl", "wb") as f:
+        pickle.dump(high_schools, f)
+    print("Saved high school data to cache.")
 
     if all_files:
         with pd.ExcelWriter("team_player_extraction.xlsx", engine="openpyxl") as writer:
             for file in all_files:
                 df = pd.read_csv(file)
-                df.to_excel(writer, sheet_name=file.split(".")[0], index=False)
+                sheet_name = file.replace(".csv", "")[
+                    :31
+                ]  # Sheet name max length is 31
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
         print("All data saved to team_player_extraction.xlsx")
 
 
