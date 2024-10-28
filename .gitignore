@@ -1,0 +1,2 @@
+venv
+.env # don't have creds yet but just in case, don't want an accidental commit
