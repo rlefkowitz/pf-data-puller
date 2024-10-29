@@ -19,33 +19,11 @@ ZYTE_CA_PATH = os.getenv("ZYTE_CA_PATH")
 if not ZYTE_API_KEY:
     raise ValueError("ZYTE_API_KEY is not set in the environment variables.")
 
-response = requests.get(
-    "https://books.toscrape.com/",
-    proxies={
-        "http": "http://0e4b348997a84ece9a77fbca497c1302:@api.zyte.com:8011/",
-        "https": "http://0e4b348997a84ece9a77fbca497c1302:@api.zyte.com:8011/",
-    },
-    verify="zyte-ca.crt",
-)
-
-print("Status Code:", response.status_code)
-
 # Set up the proxies without the API key
 zyte_proxies = {
     "http": f"http://{ZYTE_API_KEY}:@api.zyte.com:8011/",
     "https": f"http://{ZYTE_API_KEY}:@api.zyte.com:8011/",
 }
-
-# Make a test request
-url = "https://httpbin.org/ip"
-
-try:
-    response = requests.get(url, proxies=zyte_proxies, verify="combined-ca-bundle.crt")
-    print("Status Code:", response.status_code)
-    print("Response:", response.text)
-except Exception as e:
-    print("Exception occurred:", e)
-
 
 # Initialize the base URL, years, and teams
 base_url = "https://www.pro-football-reference.com"
@@ -180,9 +158,15 @@ def get_high_school():
 
 
 def scrape_team_roster(team, year):
+    file_name = f"{year}_{team}_roster.csv"
     if (team, year) in processed_teams_years:
         print(f"Already processed {team} for {year}, skipping.")
-        return None
+        # Return the existing CSV file name if it exists
+        if os.path.exists(file_name):
+            return file_name
+        else:
+            print(f"CSV file {file_name} not found for {team} in {year}.")
+            return None
     print(f"Scraping {team} for {year}...")
     url = f"{base_url}/teams/{team}/{year}_roster.htm"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
@@ -221,6 +205,9 @@ def scrape_team_roster(team, year):
                                 player_name = a_tag.text.strip()
                                 player_url = a_tag["href"]
                                 player_links[player_name] = player_url
+
+                    # Add "Player URL" column to the DataFrame
+                    df["Player URL"] = df["Player"].map(player_links)
 
                     # Enqueue uncached or None-valued players
                     for player_name, player_url in player_links.items():
@@ -285,14 +272,43 @@ def scrape_all_teams():
         player_queue.join()
         print("All high school data fetched.")
 
+    # Remove duplicates from all_files
+    all_files = list(set(all_files))
+
+    # Update CSV files with high school data
+    for file_name in all_files:
+        if os.path.exists(file_name):
+            df = pd.read_csv(file_name)
+            # Ensure 'Player URL' and 'High School' columns exist
+            if "Player URL" in df.columns and "High School" in df.columns:
+                # Update 'High School' column using 'Player URL' and 'high_schools' cache
+                for idx, row in df.iterrows():
+                    player_url = row["Player URL"]
+                    if pd.notna(player_url):
+                        with high_schools_lock:
+                            high_school = high_schools.get(player_url)
+                        df.at[idx, "High School"] = high_school
+                # Save the updated DataFrame to CSV
+                df.to_csv(file_name, index=False)
+                print(f"Updated {file_name} with high school data.")
+            else:
+                print(f"'Player URL' or 'High School' column missing in {file_name}.")
+        else:
+            print(f"CSV file {file_name} not found.")
+
     # Combine and save all data
     if all_files:
         with pd.ExcelWriter("team_player_extraction.xlsx", engine="openpyxl") as writer:
             for file in all_files:
-                df = pd.read_csv(file)
-                sheet_name = file.replace(".csv", "")[:31]
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
-        print("All data saved to team_player_extraction.xlsx")
+                if os.path.exists(file):
+                    df = pd.read_csv(file)
+                    sheet_name = file.replace(".csv", "")[:31]
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+                else:
+                    print(f"CSV file {file} not found.")
+            print("All data saved to team_player_extraction.xlsx")
+    else:
+        print("No CSV files to combine.")
 
 
 if __name__ == "__main__":
