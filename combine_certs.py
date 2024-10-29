@@ -1,5 +1,3 @@
-import os
-
 import certifi
 
 # Paths to the CA bundles
