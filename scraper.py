@@ -114,17 +114,7 @@ def get_high_school(args):
                 for p in bio_section.find_all("p"):
                     strong_tag = p.find("strong")
                     if strong_tag and strong_tag.text.strip() == "High School":
-                        # Collect the text after the <strong> tag
-                        high_school_info = ""
-                        for elem in strong_tag.next_siblings:
-                            if isinstance(elem, str):
-                                text = elem.strip()
-                                if text == ":" or text == "":
-                                    continue
-                                high_school_info += text + " "
-                            else:
-                                high_school_info += elem.get_text(strip=True) + " "
-                        high_school = high_school_info.strip()
+                        high_school = p.get_text().split(":")[1].strip()
                         break
                 with high_schools_lock:
                     high_schools[player_url] = high_school
