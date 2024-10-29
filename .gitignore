@@ -4,3 +4,11 @@ venv
 
 zyte-ca.crt
 combined-ca-bundle.crt
+
+**.pkl
+**.csv
+**.xlsx
+.DS_Store
+__pycache__
+*.pyc
+*.pyo

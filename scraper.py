@@ -1,7 +1,7 @@
-import base64
+import functools
 import os
 import pickle
-import random
+import queue
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -85,6 +85,8 @@ teams = [
     "was",
 ]
 
+player_queue = queue.Queue()
+
 # Load cached high school data if available
 high_schools_lock = threading.Lock()  # Lock for thread-safe access to high_schools
 try:
@@ -118,53 +120,63 @@ def save_processed_teams_years():
     print("Processed teams and years saved to cache.")
 
 
-def get_high_school(args):
-    (player_url,) = args
-    with high_schools_lock:
-        if player_url in high_schools:
-            return player_url, high_schools[player_url]
-    print(f"Scraping high school info for {player_url}...")
-    url = base_url + player_url
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
+def get_high_school():
+    while True:
+        try:
+            player_url = player_queue.get(timeout=5)
+        except queue.Empty:
+            break
 
-    try:
-        response = requests.get(
-            url,
-            headers=headers,
-            proxies=zyte_proxies,
-            verify="combined-ca-bundle.crt",
-            timeout=30,
-        )
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.content, "html.parser")
-            bio_section = soup.find("div", id="meta")
-            if bio_section:
-                high_school = None
-                # Improved extraction logic
-                for p in bio_section.find_all("p"):
-                    strong_tag = p.find("strong")
-                    if strong_tag and strong_tag.text.strip() == "High School":
-                        high_school_info = ""
-                        for elem in strong_tag.next_siblings:
-                            if isinstance(elem, str):
-                                text = elem.strip()
-                                if text == ":" or text == "":
-                                    continue
-                                high_school_info += text + " "
-                            else:
-                                high_school_info += elem.get_text(strip=True) + " "
-                        high_school = high_school_info.strip()
-                        break
-                with high_schools_lock:
-                    high_schools[player_url] = high_school
-                return player_url, high_school
+        with high_schools_lock:
+            if player_url in high_schools and high_schools[player_url] is not None:
+                player_queue.task_done()
+                continue
+
+        print(f"Scraping high school info for {player_url}...")
+        url = base_url + player_url
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
+
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                proxies=zyte_proxies,
+                verify="combined-ca-bundle.crt",
+                timeout=30,
+            )
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, "html.parser")
+                bio_section = soup.find("div", id="meta")
+                if bio_section:
+                    high_school = None
+                    for p in bio_section.find_all("p"):
+                        strong_tag = p.find("strong")
+                        if strong_tag and strong_tag.text.strip() == "High School":
+                            high_school_info = ""
+                            for elem in strong_tag.next_siblings:
+                                if isinstance(elem, str):
+                                    text = elem.strip()
+                                    if text == ":" or text == "":
+                                        continue
+                                    high_school_info += text + " "
+                                else:
+                                    high_school_info += elem.get_text(strip=True) + " "
+                            high_school = high_school_info.strip()
+                            break
+                    with high_schools_lock:
+                        high_schools[player_url] = high_school
+                    print(f"Updated high school for {player_url}: {high_school}")
+                else:
+                    print(f"Bio section not found for {player_url}")
             else:
-                print(f"Bio section not found for {player_url}")
-        else:
-            print(f"Error scraping {player_url}: Status code {response.status_code}")
-    except Exception as e:
-        print(f"Exception while scraping {player_url}: {e}")
-    return player_url, None
+                print(
+                    f"Error scraping {player_url}: Status code {response.status_code}"
+                )
+        except Exception as e:
+            print(f"Exception while scraping {player_url}: {e}")
+        finally:
+            save_high_schools()
+            player_queue.task_done()
 
 
 def scrape_team_roster(team, year):
@@ -210,48 +222,23 @@ def scrape_team_roster(team, year):
                                 player_url = a_tag["href"]
                                 player_links[player_name] = player_url
 
-                    # Prepare arguments for multithreading
-                    args_list = [
-                        (player_links[player_name],)
-                        for player_name in df["Player"]
-                        if player_name in player_links
-                    ]
+                    # Enqueue uncached or None-valued players
+                    for player_name, player_url in player_links.items():
+                        with high_schools_lock:
+                            if (
+                                player_url not in high_schools
+                                or high_schools[player_url] is None
+                            ):
+                                player_queue.put(player_url)
 
-                    # Use ThreadPoolExecutor for multithreading
-                    with ThreadPoolExecutor(max_workers=5) as executor:
-                        future_to_player = {
-                            executor.submit(get_high_school, args): args
-                            for args in args_list
-                        }
-                        for future in as_completed(future_to_player):
-                            try:
-                                player_url, high_school = future.result()
-                                player_name = next(
-                                    (
-                                        name
-                                        for name, url in player_links.items()
-                                        if url == player_url
-                                    ),
-                                    None,
-                                )
-                                if player_name:
-                                    idx = df.index[df["Player"] == player_name].tolist()
-                                    if idx:
-                                        df.at[idx[0], "High School"] = high_school
-                                    print(
-                                        f"Player: {player_name}, High School: {high_school}"
-                                    )
-                            except Exception as e:
-                                print(f"Exception in thread: {e}")
-                            # Save high schools cache after each player
-                            save_high_schools()
+                    # Update processed teams and years
+                    processed_teams_years.add((team, year))
+                    save_processed_teams_years()
+
                     # Save DataFrame to CSV
                     file_name = f"{year}_{team}_roster.csv"
                     df.to_csv(file_name, index=False)
                     print(f"Saved {file_name}")
-                    # Update processed teams and years
-                    processed_teams_years.add((team, year))
-                    save_processed_teams_years()
                     return file_name
                 else:
                     print(f"Roster table not found for {team} in {year}")
@@ -268,17 +255,35 @@ def scrape_team_roster(team, year):
 
 def scrape_all_teams():
     all_files = []
-    for team in teams:
-        for year in years:
+    max_workers = 16
+
+    with ThreadPoolExecutor(
+        max_workers=max_workers
+    ) as team_executor, ThreadPoolExecutor(max_workers=max_workers) as player_executor:
+
+        # Start player data fetching threads
+        for _ in range(max_workers):
+            player_executor.submit(get_high_school)
+
+        # Submit team scraping tasks
+        team_futures = []
+        for team in teams:
+            for year in years:
+                future = team_executor.submit(scrape_team_roster, team, year)
+                team_futures.append(future)
+
+        # Wait for all team scraping tasks to complete
+        for future in as_completed(team_futures):
             try:
-                csv_file = scrape_team_roster(team, year)
+                csv_file = future.result()
                 if csv_file:
                     all_files.append(csv_file)
             except Exception as e:
-                print(f"Failed to scrape {team} in {year}: {e}")
-            time.sleep(
-                random.uniform(1, 2)
-            )  # Slight delay between team-year combinations
+                print(f"Exception in team scraping: {e}")
+
+        # Wait for the player queue to be fully processed
+        player_queue.join()
+        print("All high school data fetched.")
 
     # Combine and save all data
     if all_files:
