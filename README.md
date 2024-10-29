@@ -2,7 +2,6 @@
 # 🏈 Pro Football Data Puller!
 
 Welcome! This is the project page for a data scraper targeting [Pro Football Reference](https://pro-football-reference.com) 🏆.
-This tool is part of a Senior Capstone Project at Haverford College 📚, exploring the impact of childhood economic circumstances on the athletic performance of professional athletes.
 
 ## 🚀 Quick Start
 
