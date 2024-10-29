@@ -1,3 +1,4 @@
+import base64
 import os
 import pickle
 import random
@@ -5,39 +6,41 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import certifi
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup, Comment
 from dotenv import load_dotenv
 
-certifi_ca_bundle = certifi.where()
-
 load_dotenv()
 
 ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
+ZYTE_CA_PATH = os.getenv("ZYTE_CA_PATH")
 
 if not ZYTE_API_KEY:
     raise ValueError("ZYTE_API_KEY is not set in the environment variables.")
 
+response = requests.get(
+    "https://books.toscrape.com/",
+    proxies={
+        "http": "http://0e4b348997a84ece9a77fbca497c1302:@api.zyte.com:8011/",
+        "https": "http://0e4b348997a84ece9a77fbca497c1302:@api.zyte.com:8011/",
+    },
+    verify="zyte-ca.crt",
+)
 
-# Set up the Zyte proxies
+print("Status Code:", response.status_code)
+
+# Set up the proxies without the API key
 zyte_proxies = {
-    "http": f"http://{ZYTE_API_KEY}:@proxy.zyte.com:8011/",
-    "https": f"http://{ZYTE_API_KEY}:@proxy.zyte.com:8011/",
+    "http": f"http://{ZYTE_API_KEY}:@api.zyte.com:8011/",
+    "https": f"http://{ZYTE_API_KEY}:@api.zyte.com:8011/",
 }
 
-
-# Initialize the session
-session = requests.Session()
-session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"})
-
-
-# Try using the session to make a request
+# Make a test request
 url = "https://httpbin.org/ip"
 
 try:
-    response = session.get(url, proxies=zyte_proxies, timeout=30)
+    response = requests.get(url, proxies=zyte_proxies, verify="combined-ca-bundle.crt")
     print("Status Code:", response.status_code)
     print("Response:", response.text)
 except Exception as e:
@@ -116,16 +119,22 @@ def save_processed_teams_years():
 
 
 def get_high_school(args):
-    player_url, session = args
+    (player_url,) = args
     with high_schools_lock:
         if player_url in high_schools:
             return player_url, high_schools[player_url]
     print(f"Scraping high school info for {player_url}...")
     url = base_url + player_url
-    headers = {"User-Agent": session.headers.get("User-Agent")}
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
 
     try:
-        response = session.get(url, headers=headers, proxies=zyte_proxies, timeout=30)
+        response = requests.get(
+            url,
+            headers=headers,
+            proxies=zyte_proxies,
+            verify="combined-ca-bundle.crt",
+            timeout=30,
+        )
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "html.parser")
             bio_section = soup.find("div", id="meta")
@@ -158,16 +167,22 @@ def get_high_school(args):
     return player_url, None
 
 
-def scrape_team_roster(team, year, session):
+def scrape_team_roster(team, year):
     if (team, year) in processed_teams_years:
         print(f"Already processed {team} for {year}, skipping.")
         return None
     print(f"Scraping {team} for {year}...")
     url = f"{base_url}/teams/{team}/{year}_roster.htm"
-    headers = {"User-Agent": session.headers.get("User-Agent")}
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
 
     try:
-        response = session.get(url, headers=headers, proxies=zyte_proxies, timeout=30)
+        response = requests.get(
+            url,
+            headers=headers,
+            proxies=zyte_proxies,
+            verify="combined-ca-bundle.crt",
+            timeout=30,
+        )
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "html.parser")
             comments = soup.find_all(string=lambda text: isinstance(text, Comment))
@@ -197,7 +212,7 @@ def scrape_team_roster(team, year, session):
 
                     # Prepare arguments for multithreading
                     args_list = [
-                        (player_links[player_name], session)
+                        (player_links[player_name],)
                         for player_name in df["Player"]
                         if player_name in player_links
                     ]
@@ -253,11 +268,10 @@ def scrape_team_roster(team, year, session):
 
 def scrape_all_teams():
     all_files = []
-    # The session is already initialized with the custom CA certificate
     for team in teams:
         for year in years:
             try:
-                csv_file = scrape_team_roster(team, year, session)
+                csv_file = scrape_team_roster(team, year)
                 if csv_file:
                     all_files.append(csv_file)
             except Exception as e:
