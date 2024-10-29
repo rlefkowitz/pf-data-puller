@@ -1,2 +1,6 @@
 venv
+
 .env
+
+zyte-ca.crt
+combined-ca-bundle.crt

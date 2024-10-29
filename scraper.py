@@ -5,10 +5,13 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import certifi
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup, Comment
 from dotenv import load_dotenv
+
+certifi_ca_bundle = certifi.where()
 
 load_dotenv()
 
@@ -17,12 +20,31 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 if not ZYTE_API_KEY:
     raise ValueError("ZYTE_API_KEY is not set in the environment variables.")
 
+
+# Set up the Zyte proxies
 zyte_proxies = {
-    "http": f"http://{ZYTE_API_KEY}:@api.zyte.com:8011/",
-    "https": f"http://{ZYTE_API_KEY}:@api.zyte.com:8011/",
+    "http": f"http://{ZYTE_API_KEY}:@proxy.zyte.com:8011/",
+    "https": f"http://{ZYTE_API_KEY}:@proxy.zyte.com:8011/",
 }
 
 
+# Initialize the session
+session = requests.Session()
+session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"})
+
+
+# Try using the session to make a request
+url = "https://httpbin.org/ip"
+
+try:
+    response = session.get(url, proxies=zyte_proxies, timeout=30)
+    print("Status Code:", response.status_code)
+    print("Response:", response.text)
+except Exception as e:
+    print("Exception occurred:", e)
+
+
+# Initialize the base URL, years, and teams
 base_url = "https://www.pro-football-reference.com"
 years = range(2017, 2024)
 teams = [
@@ -100,7 +122,8 @@ def get_high_school(args):
             return player_url, high_schools[player_url]
     print(f"Scraping high school info for {player_url}...")
     url = base_url + player_url
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
+    headers = {"User-Agent": session.headers.get("User-Agent")}
+
     try:
         response = session.get(url, headers=headers, proxies=zyte_proxies, timeout=30)
         if response.status_code == 200:
@@ -141,7 +164,8 @@ def scrape_team_roster(team, year, session):
         return None
     print(f"Scraping {team} for {year}...")
     url = f"{base_url}/teams/{team}/{year}_roster.htm"
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
+    headers = {"User-Agent": session.headers.get("User-Agent")}
+
     try:
         response = session.get(url, headers=headers, proxies=zyte_proxies, timeout=30)
         if response.status_code == 200:
@@ -185,22 +209,25 @@ def scrape_team_roster(team, year, session):
                             for args in args_list
                         }
                         for future in as_completed(future_to_player):
-                            player_url, high_school = future.result()
-                            player_name = next(
-                                (
-                                    name
-                                    for name, url in player_links.items()
-                                    if url == player_url
-                                ),
-                                None,
-                            )
-                            if player_name:
-                                idx = df.index[df["Player"] == player_name].tolist()
-                                if idx:
-                                    df.at[idx[0], "High School"] = high_school
-                                print(
-                                    f"Player: {player_name}, High School: {high_school}"
+                            try:
+                                player_url, high_school = future.result()
+                                player_name = next(
+                                    (
+                                        name
+                                        for name, url in player_links.items()
+                                        if url == player_url
+                                    ),
+                                    None,
                                 )
+                                if player_name:
+                                    idx = df.index[df["Player"] == player_name].tolist()
+                                    if idx:
+                                        df.at[idx[0], "High School"] = high_school
+                                    print(
+                                        f"Player: {player_name}, High School: {high_school}"
+                                    )
+                            except Exception as e:
+                                print(f"Exception in thread: {e}")
                             # Save high schools cache after each player
                             save_high_schools()
                     # Save DataFrame to CSV
@@ -226,8 +253,7 @@ def scrape_team_roster(team, year, session):
 
 def scrape_all_teams():
     all_files = []
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"})
+    # The session is already initialized with the custom CA certificate
     for team in teams:
         for year in years:
             try:
