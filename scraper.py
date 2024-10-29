@@ -1,6 +1,7 @@
 import os
 import pickle
 import random
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -62,6 +63,7 @@ teams = [
 ]
 
 # Load cached high school data if available
+high_schools_lock = threading.Lock()  # Lock for thread-safe access to high_schools
 try:
     with open("high_schools.pkl", "rb") as f:
         high_schools = pickle.load(f)
@@ -70,11 +72,34 @@ except FileNotFoundError:
     high_schools = {}
     print("No cached high school data found, starting fresh.")
 
+# Load processed teams and years
+try:
+    with open("processed_teams_years.pkl", "rb") as f:
+        processed_teams_years = pickle.load(f)
+    print("Loaded processed teams and years.")
+except FileNotFoundError:
+    processed_teams_years = set()
+    print("No processed teams and years found, starting fresh.")
+
+
+def save_high_schools():
+    with high_schools_lock:
+        with open("high_schools.pkl", "wb") as f:
+            pickle.dump(high_schools, f)
+    print("High school data saved to cache.")
+
+
+def save_processed_teams_years():
+    with open("processed_teams_years.pkl", "wb") as f:
+        pickle.dump(processed_teams_years, f)
+    print("Processed teams and years saved to cache.")
+
 
 def get_high_school(args):
     player_url, session = args
-    if player_url in high_schools:
-        return player_url, high_schools[player_url]
+    with high_schools_lock:
+        if player_url in high_schools:
+            return player_url, high_schools[player_url]
     print(f"Scraping high school info for {player_url}...")
     url = base_url + player_url
     headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
@@ -89,6 +114,7 @@ def get_high_school(args):
                 for p in bio_section.find_all("p"):
                     strong_tag = p.find("strong")
                     if strong_tag and strong_tag.text.strip() == "High School":
+                        # Collect the text after the <strong> tag
                         high_school_info = ""
                         for elem in strong_tag.next_siblings:
                             if isinstance(elem, str):
@@ -98,10 +124,13 @@ def get_high_school(args):
                                 high_school_info += text + " "
                             else:
                                 high_school_info += elem.get_text(strip=True) + " "
-                        high_school = p.get_text().split(":")[1].strip()
+                        high_school = high_school_info.strip()
                         break
-                high_schools[player_url] = high_school
+                with high_schools_lock:
+                    high_schools[player_url] = high_school
                 return player_url, high_school
+            else:
+                print(f"Bio section not found for {player_url}")
         else:
             print(f"Error scraping {player_url}: Status code {response.status_code}")
     except Exception as e:
@@ -110,6 +139,9 @@ def get_high_school(args):
 
 
 def scrape_team_roster(team, year, session):
+    if (team, year) in processed_teams_years:
+        print(f"Already processed {team} for {year}, skipping.")
+        return None
     print(f"Scraping {team} for {year}...")
     url = f"{base_url}/teams/{team}/{year}_roster.htm"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"}
@@ -172,10 +204,15 @@ def scrape_team_roster(team, year, session):
                                 print(
                                     f"Player: {player_name}, High School: {high_school}"
                                 )
+                            # Save high schools cache after each player
+                            save_high_schools()
                     # Save DataFrame to CSV
                     file_name = f"{year}_{team}_roster.csv"
                     df.to_csv(file_name, index=False)
                     print(f"Saved {file_name}")
+                    # Update processed teams and years
+                    processed_teams_years.add((team, year))
+                    save_processed_teams_years()
                     return file_name
                 else:
                     print(f"Roster table not found for {team} in {year}")
@@ -193,7 +230,6 @@ def scrape_team_roster(team, year, session):
 def scrape_all_teams():
     all_files = []
     session = requests.Session()
-    # Do not set proxies here, as we pass them in individual requests
     session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; MyScraper/1.0)"})
     for team in teams:
         for year in years:
@@ -206,10 +242,6 @@ def scrape_all_teams():
             time.sleep(
                 random.uniform(1, 2)
             )  # Slight delay between team-year combinations
-    # Save high schools cache
-    with open("high_schools.pkl", "wb") as f:
-        pickle.dump(high_schools, f)
-    print("Saved high school data to cache.")
 
     # Combine and save all data
     if all_files:
