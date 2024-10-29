@@ -17,12 +17,10 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 if not ZYTE_API_KEY:
     raise ValueError("ZYTE_API_KEY is not set in the environment variables.")
 
-zyte_proxies = (
-    {
-        "http": "http://44a91fceabe94e4ab99ff415962eeb1b:@api.zyte.com:8011/",
-        "https": "http://44a91fceabe94e4ab99ff415962eeb1b:@api.zyte.com:8011/",
-    },
-)
+zyte_proxies = {
+    "http": f"http://{ZYTE_API_KEY}:@api.zyte.com:8011/",
+    "https": f"http://{ZYTE_API_KEY}:@api.zyte.com:8011/",
+}
 
 
 base_url = "https://www.pro-football-reference.com"
