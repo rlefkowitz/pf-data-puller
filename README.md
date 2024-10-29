@@ -2,6 +2,7 @@
 Welcome! This is the project page for a data scraper on https://pro-football-reference.com to provide data for a Senior Capstone Project at Haverford College focused on the influence of childhood economic circumstances on athletic performance of professional athletes.
 
 ## Usage
+NOTE: Currently, you will need a [Zyte](https://www.zyte.com/) api key to get things rolling. This is for proxying requests so we don't have to abide by those painfully slow rate limits (10req/min).
 Using this project is straightforward. Simply open the terminal, navigate to a desirable location (optional), and clone the repository.
 
 ### If you have a Unix-based OS

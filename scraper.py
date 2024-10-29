@@ -1,3 +1,4 @@
+import os
 import pickle
 import random
 import time
@@ -5,6 +6,14 @@ import time
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup, Comment
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
+
+if not ZYTE_API_KEY:
+    raise ValueError("ZYTE_API_KEY is not set in the environment variables.")
 
 base_url = "https://www.pro-football-reference.com"
 years = range(2017, 2024)
@@ -65,13 +74,26 @@ def get_high_school(player_url, session):
         bio_section = soup.find("div", id="meta")
         if bio_section:
             high_school = None
+            # Loop through all <p> tags in the bio section
             for p in bio_section.find_all("p"):
-                p_text = p.get_text()
-                if "High School" in p_text:
-                    high_school = p_text.split(":")[1].strip()
+                strong_tag = p.find("strong")
+                # Check if the <strong> tag exists and contains "High School"
+                if strong_tag and strong_tag.text.strip() == "High School":
+                    # Initialize an empty string to collect high school info
+                    high_school_info = ""
+                    # Iterate over all siblings after the <strong> tag
+                    for elem in strong_tag.next_siblings:
+                        if isinstance(elem, str):
+                            text = elem.strip()
+                            if text == ":" or text == "":
+                                continue
+                            high_school_info += text + " "
+                        else:
+                            high_school_info += elem.get_text(strip=True) + " "
+                    high_school = p.get_text().split(":")[1].strip()
                     break
             high_schools[player_url] = high_school
-            time.sleep(random.uniform(3, 5))  # Respect crawl delay with randomness
+            time.sleep(random.uniform(6, 10))  # Respect crawl delay with randomness
             return high_school
     else:
         print(f"Error scraping {player_url}: Status code {response.status_code}")
@@ -122,7 +144,7 @@ def scrape_team_roster(team, year, session):
                     else:
                         print(f"Player link not found for {player_name}")
                     time.sleep(
-                        random.uniform(3, 5)
+                        random.uniform(6, 10)
                     )  # Respect crawl delay with randomness
 
                 file_name = f"{year}_{team}_roster.csv"
@@ -151,7 +173,7 @@ def scrape_all_teams():
                     all_files.append(csv_file)
             except Exception as e:
                 print(f"Failed to scrape {team} in {year}: {e}")
-            time.sleep(random.uniform(3, 5))  # Respect crawl delay between teams
+            time.sleep(random.uniform(6, 10))  # Respect crawl delay between teams
 
     # Save high schools cache
     with open("high_schools.pkl", "wb") as f:
