@@ -1,17 +1,28 @@
-# Pro Football Data Puller!
-Welcome! This is the project page for a data scraper on https://pro-football-reference.com to provide data for a Senior Capstone Project at Haverford College focused on the influence of childhood economic circumstances on athletic performance of professional athletes.
 
-## Usage
-NOTE: Currently, you will need a [Zyte](https://www.zyte.com/) api key to get things rolling (place it in a file at the root called `.env` in the same format as `.env.example`). This is for proxying requests so we don't have to abide by those painfully slow rate limits (10req/min).
-You will also need a Zyte CA, or certificate. Make sure you call it `zyte-ca.crt` and place it at the root of the project. After following the below instructions for creating a virtual environment, run `python combine_certs.py`. This should produce a file called `combined-ca-bundle.crt`.
+# 🏈 Pro Football Data Puller!
 
-Using this project is straightforward. Simply open the terminal, navigate to a desirable location (optional), and clone the repository.
+Welcome! This is the project page for a data scraper targeting [Pro Football Reference](https://pro-football-reference.com) 🏆.
+This tool is part of a Senior Capstone Project at Haverford College 📚, exploring the impact of childhood economic circumstances on the athletic performance of professional athletes.
 
-### If you have a Unix-based OS
-Once you've cloned, you can run `make run`! This will set up requirements with a virtual environment `venv` and execute the script inside of that virtual environment.
+## 🚀 Quick Start
 
-If you prefer conda, I'm sure you already know what to do. The requirements are in `requirements.txt`. Make sure you're using `python3.12`.
-However, `make run` does depend on using a venv, so you'll need to enter the environment, ensure you've installed the requirements, and then call `python scraper.py`.
+> **Note**: You’ll need a [Zyte](https://www.zyte.com/) API key 🔑 to get things rolling! Place it in a `.env` file at the root of this project, following the format in `.env.example`. This helps us bypass slow rate limits (10 req/min). Also, be sure to have a Zyte certificate file `zyte-ca.crt` at the root. Run `python combine_certs.py` afterward to create `combined-ca-bundle.crt`.
 
-### Windows Users
-This project will work just fine. If you're comfortable with it, using `python3.12` set up a virtualenv (preferrably) or a conda environment. Then, `source` into the workspace, run `pip install -r requirements.txt`. Once that's all done, you're home free. Run `python scraper.py`!
+### 🛠 Setup Steps
+
+1. **Clone the repository**: Open your terminal, navigate to your desired location, and clone the repo.
+2. **Install Requirements**:
+
+#### 🐧 For Unix-based OS
+- Run `make run` to set up a virtual environment (`venv`) and install requirements. The script will execute inside the virtual environment.
+- If you’re using Conda, use `requirements.txt` and ensure you’re running `python3.12`.
+  - ⚠️ Note: `make run` depends on using `venv`. Enter the environment, install requirements, and then run `python scraper.py`.
+
+#### 🖥️ For Windows Users
+- Set up a virtual environment (or Conda) with `python3.12`. Activate it, then run `pip install -r requirements.txt`.
+- After setup, simply run `python scraper.py` to start scraping! 🎉
+
+## 🤝 Contributing
+Feel free to fork the repo and make pull requests for any improvements.
+
+Happy scraping! 🚀
